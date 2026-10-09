@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Minh họa DNS Sinkhole (Pi-hole)</title>
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--tx:#1d2733;--mu:#6b7785;--bd:#d9e0e8;--ok:#1a9d5c;--bad:#d64545;--ac:#2563eb}
+@media(prefers-color-scheme:dark){:root{--bg:#10151c;--card:#19212b;--tx:#e6ebf1;--mu:#93a0ae;--bd:#2c3846}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--tx);padding:16px}
+h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mu);font-size:13px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,button{font:inherit;padding:7px 10px;border-radius:7px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+input{flex:1;min-width:180px}button{cursor:pointer}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+button.chip{font-size:12px;padding:4px 8px}
+svg{width:100%;height:auto}text{fill:var(--tx);font-size:13px}
+.node{fill:var(--card);stroke:var(--bd);stroke-width:2}
+#step{min-height:44px;font-size:14px;padding:8px 10px;border-left:4px solid var(--ac);background:var(--bg)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:5px 6px;text-align:left;border-bottom:1px solid var(--bd)}
+.b{color:var(--bad);font-weight:600}.a{color:var(--ok);font-weight:600}
+.stats{display:flex;gap:16px;font-size:14px;flex-wrap:wrap}.stats b{font-size:18px}
+label{font-size:14px}small{color:var(--mu)}
+#pk{transition:transform .8s linear}
+</style></head><body>
+<h1>Minh họa DNS Sinkhole (Pi-hole)</h1>
+<div class="sub">Mô phỏng cách Pi-hole chặn quảng cáo / tên miền độc hại ở tầng DNS</div>
+
+<div class="card">
+<div class="row">
+<input id="dom" value="google.com" placeholder="Nhập tên miền, ví dụ: google.com">
+<button class="p" id="go">▶ Gửi truy vấn DNS</button>
+<label><input type="checkbox" id="en" checked style="flex:none;min-width:0"> Bật Pi-hole</label>
+</div>
+<div class="row" style="margin-top:8px"><small>Thử nhanh:</small><span id="chips" class="row"></span></div>
+</div>
+
+<div class="card">
+<svg viewBox="0 0 760 210">
+<g id="nodes"></g>
+<g id="pk" style="transform:translate(70px,95px)" opacity="0"><circle r="9" id="pc" fill="#2563eb"/><text id="pt" y="-14" text-anchor="middle" font-size="11"></text></g>
+</svg>
+<div id="step">Nhấn "Gửi truy vấn DNS" để bắt đầu.</div>
+</div>
+
+<div class="card">
+<div class="stats"><span>Tổng truy vấn: <b id="s1">0</b></span><span>Đã chặn: <b id="s2" class="b">0</b></span><span>Tỉ lệ chặn: <b id="s3">0%</b></span></div>
+</div>
+
+<div class="card"><b>Danh sách chặn (blocklist)</b>
+<div class="row" style="margin:6px 0"><input id="nb" placeholder="Thêm tên miền cần chặn"><button id="add">Thêm</button></div>
+<div id="bl" class="row"></div></div>
+
+<div class="card"><b>Query Log</b>
+<table><thead><tr><th>Giờ</th><th>Tên miền</th><th>Kết quả</th><th>IP trả về</th></tr></thead><tbody id="log"></tbody></table></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const X={client:70,pihole:250,dns:450,web:660},Y=95;
+const sites={"google.com":"142.250.66.14","facebook.com":"157.240.15.35","youtube.com":"142.250.199.78","wikipedia.org":"103.102.166.224"};
+const blocked=new Set(["ads.doubleclick.net","tracker.adservice.com","malware-c2.example.com","phishing-bank.example.net"]);
+const cache={};let tot=0,blk=0,busy=false;
+const names=[["client","Máy khách","Laptop / Điện thoại"],["pihole","Pi-hole","DNS Sinkhole"],["dns","DNS Upstream","1.1.1.1 / 8.8.8.8"],["web","Web Server","Trang đích"]];
+$("nodes").innerHTML=names.map(([k,a,b])=>`<rect class="node" x="${X[k]-55}" y="${Y-35}" width="110" height="70" rx="10" ${k=="pihole"?'style="stroke:#d64545"':''}/><text x="${X[k]}" y="${Y-4}" text-anchor="middle" font-weight="600">${a}</text><text x="${X[k]}" y="${Y+14}" text-anchor="middle" font-size="11" style="fill:var(--mu)">${b}</text>`).join("")+
+`<line x1="125" y1="${Y+50}" x2="195" y2="${Y+50}" stroke="transparent"/>`;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function mv(from,to,label,col){
+ const pk=$("pk");pk.style.transition="none";pk.style.transform=`translate(${X[from]}px,${Y+(from==to?0:0)}px)`;
+ $("pc").setAttribute("fill",col);$("pt").textContent=label;pk.setAttribute("opacity","1");
+ await sleep(30);pk.style.transition="transform .8s linear";pk.style.transform=`translate(${X[to]}px,${Y}px)`;await sleep(850);}
+const say=(t,c)=>{$("step").innerHTML=t;$("step").style.borderColor=c||"var(--ac)"};
+function addLog(d,res,ip){const t=new Date().toLocaleTimeString("vi-VN");
+ $("log").insertAdjacentHTML("afterbegin",`<tr><td>${t}</td><td>${d}</td><td class="${res=="Đã chặn"?"b":"a"}">${res}</td><td>${ip}</td></tr>`);
+ tot++;if(res=="Đã chặn")blk++;$("s1").textContent=tot;$("s2").textContent=blk;$("s3").textContent=Math.round(blk/tot*100)+"%";}
+function fakeIp(d){let h=0;for(const c of d)h=(h*31+c.charCodeAt(0))>>>0;return `${(h%200)+20}.${(h>>8)%250}.${(h>>16)%250}.${(h>>3)%250}`}
+async function run(){
+ if(busy)return;const d=$("dom").value.trim().toLowerCase();if(!d)return;busy=true;$("go").disabled=true;
+ const on=$("en").checked;
+ say(`<b>Bước 1:</b> Máy khách hỏi "<b>${d}</b> có địa chỉ IP là gì?" (truy vấn DNS loại A, UDP cổng 53).`);
+ if(!on){
+  await mv("client","dns","A? "+d,"#2563eb");
+  say(`<b>Bước 2:</b> Pi-hole đang TẮT nên truy vấn đi thẳng tới DNS upstream, không có lớp lọc nào.`,"#d97706");await sleep(900);
+  const ip=sites[d]||fakeIp(d);
+  await mv("dns","client",ip,"#1a9d5c");
+  say(`<b>Bước 3:</b> Máy khách nhận IP ${ip} và kết nối. Nếu là tên miền quảng cáo/độc hại thì vẫn kết nối bình thường!`,"#d97706");
+  await mv("client","web","HTTP(S)","#2563eb");addLog(d,"Cho phép (không lọc)",ip);
+ } else {
+  await mv("client","pihole","A? "+d,"#2563eb");
+  say(`<b>Bước 2:</b> Pi-hole đối chiếu "<b>${d}</b>" với blocklist (gravity) gồm ${blocked.size} tên miền.`);await sleep(1100);
+  const isB=[...blocked].some(b=>d==b||d.endsWith("."+b));
+  if(isB){
+   say(`<b>Bước 3 – CHẶN:</b> Tên miền nằm trong blocklist. Pi-hole <b>không</b> hỏi upstream mà trả ngay <b>0.0.0.0</b> (sinkhole).`,"#d64545");
+   await mv("pihole","client","0.0.0.0","#d64545");
+   say(`<b>Bước 4:</b> Máy khách nhận 0.0.0.0 nên không thể kết nối tới máy chủ quảng cáo/mã độc. Truy vấn bị vô hiệu hóa ngay tại tầng DNS.`,"#d64545");
+   addLog(d,"Đã chặn","0.0.0.0");
+  } else {
+   let ip=cache[d];
+   if(ip){say(`<b>Bước 3:</b> Không bị chặn, và đã có trong <b>cache</b> của Pi-hole nên trả lời ngay.`,"#1a9d5c");}
+   else{
+    say(`<b>Bước 3:</b> Không bị chặn. Pi-hole chuyển tiếp (forward) truy vấn tới DNS upstream.`,"#1a9d5c");
+    await mv("pihole","dns","A? "+d,"#2563eb");await sleep(500);
+    ip=sites[d]||fakeIp(d);
+    await mv("dns","pihole",ip,"#1a9d5c");cache[d]=ip;
+    say(`<b>Bước 4:</b> Upstream trả IP ${ip}. Pi-hole lưu vào cache để lần sau nhanh hơn.`,"#1a9d5c");await sleep(800);}
+   await mv("pihole","client",ip,"#1a9d5c");
+   say(`<b>Bước 5:</b> Máy khách nhận IP ${ip} và kết nối tới web server.`,"#1a9d5c");
+   await mv("client","web","HTTP(S)","#2563eb");addLog(d,"Cho phép",ip);
+  }
+ }
+ $("pk").setAttribute("opacity","0");busy=false;$("go").disabled=false;}
+function renderBl(){$("bl").innerHTML=[...blocked].map(b=>`<button class="chip" onclick="blocked.delete('${b}');renderBl();chips()">${b} ✕</button>`).join("")}
+function chips(){$("chips").innerHTML=[...Object.keys(sites).slice(0,3),...blocked].map(d=>`<button class="chip" onclick="$('dom').value='${d}'">${d}</button>`).join("")}
+$("go").onclick=run;$("dom").onkeydown=e=>{if(e.key=="Enter")run()};
+$("add").onclick=()=>{const v=$("nb").value.trim().toLowerCase();if(v){blocked.add(v);$("nb").value="";renderBl();chips()}};
+renderBl();chips();
+</script></body></html>
