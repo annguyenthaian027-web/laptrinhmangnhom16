@@ -1,0 +1,110 @@
+# SinkholeHome - Nhóm 16
+# Chạy lõi (Pi-hole + Unbound):      docker compose up -d
+# Chạy thêm backend + frontend:      docker compose --profile app up -d --build
+# Chạy thêm VPN WireGuard:           docker compose --profile vpn up -d
+# Chạy tất cả:                       docker compose --profile app --profile vpn up -d --build
+
+services:
+  # ---------- TV1: Pi-hole (DNS Sinkhole) ----------
+  pihole:
+    image: pihole/pihole:${PIHOLE_TAG:-latest}
+    container_name: pihole
+    hostname: pihole
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "${PIHOLE_WEB_PORT:-80}:80/tcp"
+      - "${PIHOLE_WEB_HTTPS_PORT:-443}:443/tcp"
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
+      # Dùng Unbound (cùng mạng Docker) làm DNS upstream
+      FTLCONF_dns_upstreams: unbound
+      # Cho phép nhận truy vấn từ các container khác (backend, WireGuard)
+      FTLCONF_dns_listeningMode: all
+    volumes:
+      - ./data/etc-pihole:/etc/pihole
+    networks:
+      sinkhole:
+        ipv4_address: 172.20.0.2
+    depends_on:
+      - unbound
+
+  # ---------- TV1: Unbound (DNS đệ quy, riêng tư) ----------
+  unbound:
+    image: mvance/unbound:latest
+    container_name: unbound
+    restart: unless-stopped
+    networks:
+      - sinkhole
+
+  # ---------- TV2: Backend (profile: app) ----------
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    container_name: sinkholehome-backend
+    restart: unless-stopped
+    environment:
+      PIHOLE_URL: http://pihole:80
+      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
+    ports:
+      - "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}"
+    volumes:
+      - ./data/backend:/app/data
+    depends_on:
+      - pihole
+    networks:
+      - sinkhole
+
+  # ---------- TV3: Frontend (profile: app) ----------
+  frontend:
+    profiles: ["app"]
+    build: ./frontend
+    container_name: sinkholehome-frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:${BACKEND_PORT:-8080}
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    networks:
+      - sinkhole
+
+  # ---------- TV1: WireGuard VPN (profile: vpn) ----------
+  # Dùng wg-easy bản 14 để khớp các biến môi trường bên dưới.
+  wg-easy:
+    profiles: ["vpn"]
+    image: ghcr.io/wg-easy/wg-easy:14
+    container_name: wg-easy
+    restart: unless-stopped
+    environment:
+      WG_HOST: ${WG_HOST}                 # IP công khai hoặc tên miền của máy chạy hệ thống
+      PASSWORD_HASH: ${WG_PASSWORD_HASH}  # mật khẩu trang quản lý (đã băm bcrypt)
+      WG_DEFAULT_DNS: 172.20.0.2          # thiết bị VPN dùng Pi-hole làm DNS
+      WG_PORT: ${WG_PORT:-51820}
+      WG_DEFAULT_ADDRESS: 10.8.0.x
+    ports:
+      - "${WG_PORT:-51820}:51820/udp"
+      - "${WG_UI_PORT:-51821}:51821/tcp"
+    volumes:
+      - ./data/wireguard:/etc/wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks:
+      - sinkhole
+    depends_on:
+      - pihole
+
+networks:
+  sinkhole:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
