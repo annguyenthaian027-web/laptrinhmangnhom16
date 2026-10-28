@@ -1,0 +1,9 @@
+# Bí mật và dữ liệu chạy thật, không commit
+.env
+data/
+
+# Khác
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
