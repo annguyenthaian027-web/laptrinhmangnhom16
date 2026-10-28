@@ -1,0 +1,18 @@
+{
+  "categories": {
+    "ads":      {"name": "Quảng cáo và theo dõi", "urls": ["https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"]},
+    "malware":  {"name": "Mã độc", "urls": ["https://urlhaus.abuse.ch/downloads/hostfile/"]},
+    "phishing": {"name": "Lừa đảo (phishing)", "urls": ["https://phishing.army/download/phishing_army_blocklist.txt"]},
+    "gambling": {"name": "Cờ bạc", "urls": ["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts"]},
+    "adult":    {"name": "Nội dung người lớn", "urls": ["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts"]},
+    "social":   {"name": "Mạng xã hội", "urls": ["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts"]}
+  },
+  "profiles": [
+    {"id": "family", "name": "Gia đình", "description": "Chặn quảng cáo, mã độc, lừa đảo",
+     "categories": ["ads", "malware", "phishing"]},
+    {"id": "kids", "name": "Trẻ em", "description": "Thêm chặn cờ bạc và nội dung người lớn",
+     "categories": ["ads", "malware", "phishing", "gambling", "adult"]},
+    {"id": "study", "name": "Học tập", "description": "Thêm chặn mạng xã hội và cờ bạc",
+     "categories": ["ads", "malware", "phishing", "gambling", "social"]}
+  ]
+}
