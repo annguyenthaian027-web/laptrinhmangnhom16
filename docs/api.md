@@ -1,5 +1,4 @@
-
-# SinkholeHome: Tài liệu API (v0.1)
+# SinkholeHome: Tài liệu API (v0.2)
 
 Tài liệu này là **hợp đồng** giữa Backend (TV2) và Frontend (TV3). Cả hai bên làm theo đúng tài liệu này. Muốn đổi endpoint hoặc cấu trúc JSON thì **báo cả nhóm và sửa file này trước**, rồi mới sửa code.
 
@@ -221,8 +220,12 @@ Response 200:
 Response 200:
 
 ```json
-{ "active": "kids", "domainsAdded": 1520 }
+{ "active": "kids", "listsAdded": 5, "listsRemoved": 0, "gravity": "updating" }
 ```
+
+- `listsAdded` / `listsRemoved`: số danh sách chặn được thêm vào / gỡ khỏi Pi-hole khi đổi hồ sơ.
+- `gravity`: `"updating"` nếu Pi-hole đang tải lại danh sách ở chế độ nền (mất vài chục giây đến vài phút), `"unchanged"` nếu không có gì thay đổi.
+- *(v0.2: thay `domainsAdded` bằng 3 trường trên, vì hồ sơ được áp dụng bằng cách thêm danh sách chặn.)*
 
 Lỗi: 404 `PROFILE_NOT_FOUND`, 502 `PIHOLE_UNREACHABLE`.
 
