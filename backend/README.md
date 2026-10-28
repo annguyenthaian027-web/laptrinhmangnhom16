@@ -1,4 +1,4 @@
-# Backend (TV2)
+# Backend 
 
 Backend FastAPI nối giao diện web với API Pi-hole v6, theo đúng `docs/api.md`.
 
