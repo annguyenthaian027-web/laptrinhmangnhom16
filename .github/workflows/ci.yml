@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: yamllint
+        run: |
+          pip install yamllint
+          yamllint -d "{extends: relaxed, rules: {line-length: disable}}" docker-compose.yml .github/workflows
+      - name: shellcheck
+        run: shellcheck install.sh
+
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kiem tra cu phap compose (tat ca profile)
+        run: |
+          cp .env.example .env
+          docker compose --profile app --profile vpn config -q
+      - name: Build backend/frontend neu co Dockerfile
+        run: |
+          if [ -f backend/Dockerfile ] && [ -f frontend/Dockerfile ]; then
+            docker compose --profile app build
+          else
+            echo "Chua du Dockerfile cua backend/frontend, bo qua build."
+          fi
+
+  test-compose:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chuan bi
+        run: |
+          cp .env.example .env
+          sed -i 's|^PIHOLE_WEB_PORT=.*|PIHOLE_WEB_PORT=8081|' .env
+          sed -i 's|^PIHOLE_WEB_HTTPS_PORT=.*|PIHOLE_WEB_HTTPS_PORT=8443|' .env
+          sudo apt-get install -y dnsutils >/dev/null
+          docker compose pull pihole unbound
+      - name: Giai phong cong 53 (runner dung systemd-resolved)
+        run: sudo systemctl stop systemd-resolved
+      - name: Khoi dong Pi-hole + Unbound
+        run: docker compose up -d pihole unbound
+      - name: Cho Pi-hole healthy
+        run: |
+          for i in $(seq 1 30); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' pihole 2>/dev/null || echo starting)
+            echo "pihole: $s"
+            [ "$s" = "healthy" ] && exit 0
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+      - name: Thu phan giai DNS qua Pi-hole
+        run: |
+          for i in $(seq 1 10); do
+            if dig @127.0.0.1 example.com +short | grep -E '^[0-9]'; then exit 0; fi
+            sleep 3
+          done
+          docker compose logs
+          exit 1
+      - name: Thu trang web Pi-hole
+        run: curl -fsS -o /dev/null http://localhost:8081/admin/
+      - name: Don dep
+        if: always()
+        run: docker compose down -v
