@@ -1,0 +1,5 @@
+# Danh sách chặn quảng cáo phổ biến (Ads Block)
+ads.google.com
+adservice.google.com
+connect.facebook.net
+analytics.google.com
