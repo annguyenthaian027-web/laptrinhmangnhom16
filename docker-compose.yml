@@ -5,15 +5,15 @@
 # Chạy tất cả: docker compose --profile app --profile vpn up -d --build
 
 services:
-  # ---------- TV1: Pi-hole (DNS Sinkhole) ----------
+  # --------- TV1: Pi-hole (DNS Sinkhole) ---------
   pihole:
     image: pihole/pihole:${PIHOLE_TAG:-latest}
     container_name: pihole
     hostname: pihole
     restart: unless-stopped
     ports:
-      - "53:53/tcp"
-      - "53:53/udp"
+      - "5353:53/tcp"
+      - "5353:53/udp"
       - "${PIHOLE_WEB_PORT:-80}:80/tcp"
       - "${PIHOLE_WEB_HTTPS_PORT:-443}:443/tcp"
     environment:
@@ -24,14 +24,14 @@ services:
       # Cho phép nhận truy vấn từ các container khác (backend, WireGuard)
       FTLCONF_dns_listeningMode: all
     volumes:
-      - ./data/etc-pihole:/etc/pihole
+      - ./data/etc-pihole/:/etc/pihole/
     networks:
       sinkhole:
         ipv4_address: 172.20.0.2
     depends_on:
       - unbound
 
-  # ---------- TV1: Unbound (DNS đệ quy, riêng tư) ----------
+  # --------- TV1: Unbound (DNS đệ quy, riêng tư) ---------
   unbound:
     image: mvance/unbound:latest
     container_name: unbound
@@ -40,7 +40,7 @@ services:
       sinkhole:
         ipv4_address: 172.20.0.3
 
-  # ---------- TV2: Backend (profile: app) ----------
+  # --------- TV2: Backend (profile: app) ---------
   backend:
     profiles: ["app"]
     build: ./backend
@@ -59,7 +59,7 @@ services:
     networks:
       - sinkhole
 
-  # ---------- TV3: Frontend (profile: app) ----------
+  # --------- TV3: Frontend (profile: app) ---------
   frontend:
     profiles: ["app"]
     build: ./frontend
@@ -74,7 +74,7 @@ services:
     networks:
       - sinkhole
 
-  # ---------- TV1: WireGuard VPN (profile: vpn) ----------
+  # --------- TV1: WireGuard VPN (profile: vpn) ---------
   # Dùng wg-easy bản 14 để khớp các biến môi trường bên dưới.
   wg-easy:
     profiles: ["vpn"]
@@ -82,9 +82,9 @@ services:
     container_name: wg-easy
     restart: unless-stopped
     environment:
-      WG_HOST: ${WG_HOST}                    # IP công khai hoặc tên miền của máy chạy hệ thống
-      PASSWORD_HASH: ${WG_PASSWORD_HASH}     # mật khẩu trang quản lý (đã băm bcrypt)
-      WG_DEFAULT_DNS: 172.20.0.2             # thiết bị VPN dùng Pi-hole làm DNS
+      WG_HOST: ${WG_HOST}
+      PASSWORD_HASH: ${WG_PASSWORD_HASH}
+      WG_DEFAULT_DNS: 172.20.0.2
       WG_PORT: ${WG_PORT:-51820}
       WG_DEFAULT_ADDRESS: 10.8.0.x
     ports:
