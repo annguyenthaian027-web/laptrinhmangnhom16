@@ -1,8 +1,8 @@
 # SinkholeHome - Nhóm 16
-# Chạy lõi (Pi-hole + Unbound):      docker compose up -d
-# Chạy thêm backend + frontend:      docker compose --profile app up -d --build
-# Chạy thêm VPN WireGuard:           docker compose --profile vpn up -d
-# Chạy tất cả:                       docker compose --profile app --profile vpn up -d --build
+# Chạy lõi (Pi-hole + Unbound): docker compose up -d
+# Chạy thêm backend + frontend: docker compose --profile app up -d --build
+# Chạy thêm VPN WireGuard: docker compose --profile vpn up -d
+# Chạy tất cả: docker compose --profile app --profile vpn up -d --build
 
 services:
   # ---------- TV1: Pi-hole (DNS Sinkhole) ----------
@@ -19,8 +19,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
-      # Dùng Unbound (cùng mạng Docker) làm DNS upstream
-      FTLCONF_dns_upstreams: unbound
+      # Dùng Unbound (IP cố định trong mạng Docker) làm DNS upstream
+      FTLCONF_dns_upstreams: "172.20.0.3#53"
       # Cho phép nhận truy vấn từ các container khác (backend, WireGuard)
       FTLCONF_dns_listeningMode: all
     volumes:
@@ -37,7 +37,8 @@ services:
     container_name: unbound
     restart: unless-stopped
     networks:
-      - sinkhole
+      sinkhole:
+        ipv4_address: 172.20.0.3
 
   # ---------- TV2: Backend (profile: app) ----------
   backend:
@@ -81,9 +82,9 @@ services:
     container_name: wg-easy
     restart: unless-stopped
     environment:
-      WG_HOST: ${WG_HOST}                 # IP công khai hoặc tên miền của máy chạy hệ thống
-      PASSWORD_HASH: ${WG_PASSWORD_HASH}  # mật khẩu trang quản lý (đã băm bcrypt)
-      WG_DEFAULT_DNS: 172.20.0.2          # thiết bị VPN dùng Pi-hole làm DNS
+      WG_HOST: ${WG_HOST}                    # IP công khai hoặc tên miền của máy chạy hệ thống
+      PASSWORD_HASH: ${WG_PASSWORD_HASH}     # mật khẩu trang quản lý (đã băm bcrypt)
+      WG_DEFAULT_DNS: 172.20.0.2             # thiết bị VPN dùng Pi-hole làm DNS
       WG_PORT: ${WG_PORT:-51820}
       WG_DEFAULT_ADDRESS: 10.8.0.x
     ports:
