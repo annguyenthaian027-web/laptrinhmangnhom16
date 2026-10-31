@@ -37,6 +37,7 @@ jobs:
   test-compose:
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Chuan bi
@@ -46,19 +47,27 @@ jobs:
           sed -i 's|^PIHOLE_WEB_HTTPS_PORT=.*|PIHOLE_WEB_HTTPS_PORT=8443|' .env
           sudo apt-get install -y dnsutils >/dev/null
           docker compose pull pihole unbound
-      - name: Giai phong cong 53 (runner dung systemd-resolved)
-        run: sudo systemctl stop systemd-resolved
+      - name: Giai phong cong 53 (chi tat stub DNS, giu DNS cua may chu)
+        run: |
+          sudo mkdir -p /etc/systemd/resolved.conf.d
+          printf '[Resolve]\nDNSStubListener=no\n' | sudo tee /etc/systemd/resolved.conf.d/nostub.conf
+          sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+          sudo systemctl restart systemd-resolved
+          cat /etc/resolv.conf
+          sudo ss -lntup | grep ':53 ' || echo "Cong 53 da trong"
       - name: Khoi dong Pi-hole + Unbound
         run: docker compose up -d pihole unbound
       - name: Cho Pi-hole healthy
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             s=$(docker inspect -f '{{.State.Health.Status}}' pihole 2>/dev/null || echo starting)
             echo "pihole: $s"
             [ "$s" = "healthy" ] && exit 0
             sleep 5
           done
-          docker compose logs
+          docker compose ps
+          docker compose logs unbound pihole --tail 80
+          docker exec pihole dig @172.20.0.3 example.com +short || true
           exit 1
       - name: Thu phan giai DNS qua Pi-hole
         run: |
@@ -66,7 +75,7 @@ jobs:
             if dig @127.0.0.1 example.com +short | grep -E '^[0-9]'; then exit 0; fi
             sleep 3
           done
-          docker compose logs
+          docker compose logs --tail 80
           exit 1
       - name: Thu trang web Pi-hole
         run: curl -fsS -o /dev/null http://localhost:8081/admin/
