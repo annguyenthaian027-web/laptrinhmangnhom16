@@ -1,5 +1,0 @@
-# Danh sách chặn lừa đảo, mã độc và cờ bạc tại Việt Nam
-malware-example.com
-phishing-test-site.com
-caocuatructuyen-fake.com
-denied-gambling-vn.com
