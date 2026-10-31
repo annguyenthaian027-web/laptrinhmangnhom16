@@ -1,0 +1,10 @@
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Frontend chỉ gọi /api; nginx chuyển tiếp sang backend (BACKEND_URL trong docker-compose)
+    location /api/ {
+        proxy_pass ${BACKEND_URL};
+    }
+}

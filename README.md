@@ -1,18 +1,85 @@
-# Dự Án Hệ Thống Chặn Lọc Quảng Cáo & DNS (Pi-hole + Unbound)
+# SinkholeHome: DNS Sinkhole chặn quảng cáo và mã độc trên nền Pi-hole
 
-Phần thi/Phân công của **Thành viên 3 (TV3)**: Phụ trách Frontend Dashboard, quản lý Blocklist và tài liệu hướng dẫn (QA)[cite: 1].
+Bài tập nhóm 16, môn Lập trình mạng. SinkholeHome đóng gói Pi-hole thành một hệ thống cài bằng một lệnh,
+có bảng điều khiển tiếng Việt để người không rành kỹ thuật vẫn dùng được.
 
-## 📂 Cấu trúc thư mục dự án
-- `index.html`: Giao diện Dashboard quản trị (responsive, tiếng Việt, hỗ trợ bật/tắt bộ lọc)[cite: 1].
-- `how-it-works.html`: Trang giải thích chi tiết cơ chế hoạt động phối hợp giữa DNS, Pi-hole và Unbound[cite: 1].
-- `blocklists/`: Thư mục lưu trữ danh sách chặn[cite: 1].
-  - `ads-block.txt`: Danh sách chặn tên miền quảng cáo[cite: 1].
-  - `phishing-block.txt`: Danh sách chặn trang web lừa đảo, mã độc và cờ bạc tại Việt Nam[cite: 1].
+## Tính năng
 
-## 📱 Hướng dẫn Kiểm thử (QA) & Cài đặt
-TV3 đã thực hiện kịch bản kiểm thử trên các nền tảng[cite: 1]:
-1. **Windows:** Cấu hình DNS thủ công trỏ về địa chỉ IP của hệ thống chặn lọc.
-2. **Android / iOS:** Sử dụng cấu hình VPN hoặc WireGuard profile để mã hóa và định hướng phân giải DNS qua hệ thống nội bộ.
+- Chặn quảng cáo, theo dõi, mã độc, lừa đảo ở tầng DNS cho mọi thiết bị dùng chung hệ thống.
+- DNS đệ quy riêng tư bằng Unbound (không nhờ DNS bên thứ ba).
+- Bảng điều khiển web: xem thống kê, bật/tắt chặn, tạm dừng 30 phút, chọn hồ sơ (Gia đình, Trẻ em, Học tập), quản lý danh sách tên miền riêng.
+- Backend REST API (FastAPI) nối bảng điều khiển với API Pi-hole v6.
+- VPN WireGuard (tùy chọn) để thiết bị bên ngoài mạng nhà vẫn đi qua hệ thống.
 
----
-*Báo cáo hoàn thành nhiệm vụ TV3 của nhóm.*
+## Kiến trúc
+
+```
+Thiết bị ──DNS──▶ Pi-hole ──▶ Unbound
+                    ▲
+Trình duyệt ──▶ Frontend (nginx) ──/api──▶ Backend (FastAPI) ──REST──▶ Pi-hole
+Thiết bị ngoài ──WireGuard──▶ Pi-hole
+```
+
+| Thư mục | Nội dung |
+|---|---|
+| `docker-compose.yml`, `.env.example` | Chạy cả hệ thống |
+| `backend/` | API, logic hồ sơ chặn, test |
+| `frontend/` | Bảng điều khiển và trang giải thích |
+| `docs/api.md` | Tài liệu API |
+| `blocklists/` | Ghi chú về nguồn danh sách chặn |
+| `dns_sinkhole_demo.html` | Bản mô phỏng từ bài tập 2 |
+
+## Cài đặt và chạy
+
+Cần Docker Desktop (hoặc Docker Engine + Compose).
+
+```bash
+cp .env.example .env          # Windows: copy .env.example .env
+# mở .env, đổi PIHOLE_PASSWORD
+docker compose --profile app up -d --build
+```
+
+- Bảng điều khiển: http://localhost:3000
+- Trang quản trị Pi-hole: http://localhost/admin
+- Chỉ chạy Pi-hole và Unbound: `docker compose up -d`
+- Thêm VPN: `docker compose --profile app --profile vpn up -d --build` (cần điền `WG_HOST`, `WG_PASSWORD_HASH` trong `.env`)
+
+Nếu cổng 80/443 bị chiếm, đổi `PIHOLE_WEB_PORT` và `PIHOLE_WEB_HTTPS_PORT` trong `.env`.
+Không mở cổng DNS (53) ra Internet công khai; dùng VPN khi cần truy cập từ ngoài.
+
+## Kiểm thử backend
+
+```bash
+cd backend
+python -m venv .venv && .venv\Scripts\activate    # macOS/Linux: source .venv/bin/activate
+pip install fastapi httpx pytest
+python -m pytest -q
+```
+
+## Trạng thái kiểm thử
+
+| Hạng mục | Kết quả |
+|---|---|
+| Backend: 5 test tự động với Pi-hole giả | Đạt (5/5) |
+| Pi-hole + Unbound chạy thật bằng Docker | *Điền sau khi chạy, kèm ảnh chụp* |
+| Backend nối Pi-hole thật | *Điền sau khi chạy* |
+| Bảng điều khiển gọi backend thật | *Điền sau khi chạy* |
+| Cấu hình DNS trên Windows / điện thoại | *Điền sau khi thử* |
+| WireGuard | *Điền sau khi thử hoặc ghi "chưa thực hiện"* |
+
+## Phân công
+
+| Thành viên | Phần phụ trách |
+|---|---|
+| TV1 | Hạ tầng: Docker Compose, Unbound, WireGuard, triển khai |
+| TV2 | Backend: API, hồ sơ chặn, test |
+| TV3 | Bảng điều khiển, danh sách chặn, kiểm thử, tài liệu |
+
+## Công cụ hỗ trợ
+
+Nhóm có dùng công cụ AI để hỗ trợ viết mã và tài liệu; các thành viên tự rà soát, chạy thử và chỉnh sửa.
+
+## Hạn chế và hướng phát triển
+
+Chưa có đăng nhập cho bảng điều khiển (hệ thống nên chỉ chạy trong mạng nội bộ hoặc qua VPN), chưa có lịch chặn theo giờ,
+chưa có danh sách riêng cho các trang lừa đảo và cờ bạc tại Việt Nam.

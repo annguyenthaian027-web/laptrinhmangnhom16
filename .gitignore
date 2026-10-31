@@ -2,10 +2,12 @@
 .env
 data/
 
-# Khác
-node_modules/
+# Môi trường Python
+.venv/
+venv/
 __pycache__/
 *.pyc
+
+# Khác
+node_modules/
 .DS_Store
-   .venv/
-   venv/

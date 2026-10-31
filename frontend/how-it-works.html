@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SinkholeHome: Hệ thống hoạt động thế nào?</title>
+<style>
+body{margin:0;background:#eef1f4;color:#14213d;font:17px/1.65 "Segoe UI",system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.7rem}h2{font-size:1.15rem;margin:0}
+ol{padding:0;list-style:none}
+li{background:#fff;border:1px solid #d5dbe3;border-radius:10px;padding:14px 18px;margin:12px 0}
+li p{margin:4px 0 0;color:#3d485c}
+a{color:#0f766e}
+a:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}
+</style>
+</head>
+<body>
+<main>
+<h1>Hệ thống hoạt động thế nào?</h1>
+<p>Mỗi lần mở một trang web hay ứng dụng, thiết bị của bạn hỏi DNS: “địa chỉ của tên miền này là gì?”. SinkholeHome chen vào bước hỏi đó. Tên miền quảng cáo hoặc mã độc nhận về địa chỉ vô hại (<code>0.0.0.0</code>) nên không tải được, còn tên miền bình thường vẫn đi qua như cũ.</p>
+<ol>
+<li><h2>Thiết bị hỏi Pi-hole</h2><p>Điện thoại hoặc máy tính dùng Pi-hole làm máy chủ DNS, trực tiếp trong mạng nhà hoặc qua VPN WireGuard khi ở ngoài.</p></li>
+<li><h2>Pi-hole đối chiếu danh sách chặn</h2><p>Nếu tên miền nằm trong danh sách quảng cáo, mã độc, lừa đảo hoặc danh sách riêng của bạn, Pi-hole trả địa chỉ vô hại. Đây là “sinkhole”: yêu cầu bị đưa vào hố đen.</p></li>
+<li><h2>Unbound tra cứu tên miền hợp lệ</h2><p>Tên miền không bị chặn được chuyển cho Unbound. Unbound tự hỏi các máy chủ gốc của Internet thay vì nhờ nhà cung cấp DNS bên thứ ba, nên lịch sử truy cập riêng tư hơn.</p></li>
+<li><h2>Bảng điều khiển quản lý tất cả</h2><p>Trang quản trị của nhóm gọi backend, backend gọi API Pi-hole để bật, tắt chặn, đổi hồ sơ và xem thống kê.</p></li>
+</ol>
+<p><a href="index.html">Về bảng điều khiển</a></p>
+</main>
+</body>
+</html>

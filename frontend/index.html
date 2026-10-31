@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SinkholeHome: Bảng điều khiển</title>
+<style>
+:root{--bg:#eef1f4;--ink:#14213d;--mute:#5b6678;--card:#fff;--line:#d5dbe3;--on:#0f766e;--off:#b45309;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,sans-serif}
+main{max-width:960px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;background:var(--on);color:#fff;border-radius:12px;padding:24px;transition:background .3s}
+header.paused{background:var(--off)}
+h1{margin:0;font-size:1.6rem}h2{font-size:1.1rem;margin:0 0 12px}
+#state{font-size:2rem;font-weight:700;margin:0}
+#sub{margin:0;opacity:.9}
+button{font:inherit;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;background:var(--ink);color:#fff}
+header button{background:#fff;color:var(--ink);font-weight:600}
+button.ghost{background:transparent;color:var(--bad);padding:4px 8px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}
+button:disabled{opacity:.6;cursor:wait}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.stat b{display:block;font-size:1.7rem}.stat span{color:var(--mute);font-size:.9rem}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);word-break:break-all}
+li:last-child{border:0}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;min-width:0}
+input{flex:1 1 200px}
+.tabs button{background:#e4e9ef;color:var(--ink)}.tabs button[aria-pressed=true]{background:var(--ink);color:#fff}
+.prof{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.prof button{text-align:left;background:#f4f6f9;color:var(--ink);border:2px solid var(--line)}
+.prof button[aria-pressed=true]{border-color:var(--on);background:#e6f4f1}
+.prof small{display:block;color:var(--mute)}
+#msg{margin-top:16px;padding:12px 16px;border-radius:8px;display:none}
+#msg.err{display:block;background:#fde8e8;color:var(--bad)}#msg.ok{display:block;background:#e6f4f1;color:var(--on)}
+.empty{color:var(--mute)}
+footer{margin-top:24px;color:var(--mute);font-size:.9rem}
+@media(prefers-reduced-motion:reduce){header{transition:none}}
+</style>
+</head>
+<body>
+<main>
+<header id="top">
+  <div>
+    <h1>SinkholeHome</h1>
+    <p id="state">Đang kết nối…</p>
+    <p id="sub"></p>
+  </div>
+  <button id="toggle" disabled>Tạm dừng chặn 30 phút</button>
+</header>
+<div id="msg" role="status" aria-live="polite"></div>
+
+<div class="grid">
+  <div class="stat"><b id="s-total">–</b><span>Tổng số truy vấn</span></div>
+  <div class="stat"><b id="s-blocked">–</b><span>Đã chặn</span></div>
+  <div class="stat"><b id="s-list">–</b><span>Tên miền trong danh sách chặn</span></div>
+  <div class="stat"><b id="s-clients">–</b><span>Thiết bị đang dùng</span></div>
+</div>
+
+<section>
+  <h2>Hồ sơ chặn</h2>
+  <div class="prof" id="profiles"></div>
+</section>
+
+<section>
+  <h2>Tên miền bị chặn nhiều nhất</h2>
+  <ul id="top-blocked"><li class="empty">Chưa có dữ liệu.</li></ul>
+</section>
+
+<section>
+  <h2>Danh sách tên miền riêng</h2>
+  <div class="row tabs" role="group" aria-label="Loại danh sách">
+    <button id="t-deny" aria-pressed="true">Luôn chặn</button>
+    <button id="t-allow" aria-pressed="false">Luôn cho phép</button>
+  </div>
+  <div class="row" style="margin:12px 0">
+    <input id="dom" placeholder="ví dụ: facebook.com" aria-label="Tên miền" autocomplete="off">
+    <button id="add">Thêm tên miền</button>
+  </div>
+  <ul id="domains"></ul>
+</section>
+
+<footer>Dữ liệu lấy từ Pi-hole qua backend của nhóm. <a href="how-it-works.html">Hệ thống hoạt động thế nào?</a></footer>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let type = 'deny', blocking = null;
+
+async function api(path, method, body) {
+  const r = await fetch('/api' + path, {
+    method: method || 'GET',
+    headers: {'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Lỗi ' + r.status);
+  return d;
+}
+function say(text, kind) { const m = $('#msg'); m.textContent = text; m.className = kind || ''; }
+const fmt = n => Number(n).toLocaleString('vi-VN');
+
+async function loadStatus() {
+  const s = await api('/status');
+  blocking = s.blocking;
+  $('#top').className = s.blocking ? '' : 'paused';
+  $('#state').textContent = s.blocking ? 'Đang chặn quảng cáo và mã độc' : 'Đã tạm dừng chặn';
+  $('#sub').textContent = !s.blocking && s.timer ? 'Tự bật lại sau ' + Math.ceil(s.timer / 60) + ' phút' : '';
+  const b = $('#toggle'); b.disabled = false;
+  b.textContent = s.blocking ? 'Tạm dừng chặn 30 phút' : 'Bật lại chặn';
+}
+async function loadStats() {
+  const s = await api('/stats');
+  $('#s-total').textContent = fmt(s.totalQueries);
+  $('#s-blocked').textContent = fmt(s.blockedQueries) + ' (' + s.blockedPercent + '%)';
+  $('#s-list').textContent = fmt(s.domainsOnBlocklist);
+  $('#s-clients').textContent = fmt(s.activeClients);
+  const t = await api('/top-blocked?count=8'), ul = $('#top-blocked');
+  ul.replaceChildren();
+  if (!t.domains.length) { ul.innerHTML = '<li class="empty">Chưa có tên miền nào bị chặn.</li>'; return; }
+  t.domains.forEach(d => { const li = document.createElement('li'); li.append(d.domain, fmt(d.count) + ' lần'); ul.append(li); });
+}
+async function loadProfiles() {
+  const p = await api('/profiles'), box = $('#profiles');
+  box.replaceChildren();
+  p.profiles.forEach(x => {
+    const b = document.createElement('button');
+    b.setAttribute('aria-pressed', x.id === p.active);
+    b.innerHTML = '<b></b><small></small>';
+    b.firstChild.textContent = x.name; b.lastChild.textContent = x.description;
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api('/profiles/' + x.id + '/apply', 'POST');
+        say('Đã áp dụng hồ sơ "' + x.name + '". ' + (r.gravity === 'updating' ? 'Pi-hole đang tải danh sách chặn mới, có thể mất vài phút.' : ''), 'ok');
+        loadProfiles();
+      } catch (e) { say(e.message, 'err'); b.disabled = false; }
+    };
+    box.append(b);
+  });
+}
+async function loadDomains() {
+  const d = await api('/domains?type=' + type), ul = $('#domains');
+  ul.replaceChildren();
+  if (!d.domains.length) { ul.innerHTML = '<li class="empty">Danh sách trống. Nhập tên miền ở trên để thêm.</li>'; return; }
+  d.domains.forEach(x => {
+    const li = document.createElement('li'), del = document.createElement('button');
+    del.className = 'ghost'; del.textContent = 'Xóa';
+    del.onclick = async () => {
+      try { await api('/domains/' + encodeURIComponent(x.domain) + '?type=' + type, 'DELETE'); loadDomains(); }
+      catch (e) { say(e.message, 'err'); }
+    };
+    li.append(x.domain, del); ul.append(li);
+  });
+}
+
+$('#toggle').onclick = async () => {
+  $('#toggle').disabled = true;
+  try {
+    await api('/blocking', 'POST', blocking ? {enabled: false, timer: 1800} : {enabled: true});
+    say(blocking ? 'Đã tạm dừng chặn 30 phút.' : 'Đã bật lại chặn.', 'ok');
+    await loadStatus();
+  } catch (e) { say(e.message, 'err'); $('#toggle').disabled = false; }
+};
+$('#add').onclick = async () => {
+  const v = $('#dom').value.trim();
+  if (!v) { say('Nhập tên miền cần thêm, ví dụ facebook.com.', 'err'); return; }
+  try { await api('/domains', 'POST', {domain: v, type}); $('#dom').value = ''; say('Đã thêm ' + v + '.', 'ok'); loadDomains(); }
+  catch (e) { say(e.message, 'err'); }
+};
+$('#dom').onkeydown = e => { if (e.key === 'Enter') $('#add').click(); };
+for (const t of ['deny', 'allow']) $('#t-' + t).onclick = () => {
+  type = t;
+  $('#t-deny').setAttribute('aria-pressed', t === 'deny'); $('#t-allow').setAttribute('aria-pressed', t === 'allow');
+  loadDomains();
+};
+
+async function refresh() {
+  try { await Promise.all([loadStatus(), loadStats()]); if ($('#msg').className === 'err') say(''); }
+  catch (e) { $('#state').textContent = 'Không kết nối được'; say(e.message + '. Kiểm tra backend và Pi-hole đang chạy.', 'err'); }
+}
+refresh(); loadProfiles().catch(() => {}); loadDomains().catch(() => {});
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
