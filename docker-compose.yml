@@ -19,9 +19,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
-      # Dùng Unbound (IP cố định trong mạng Docker) làm DNS upstream
       FTLCONF_dns_upstreams: "172.20.0.3#53"
-      # Cho phép nhận truy vấn từ các container khác (backend, WireGuard)
       FTLCONF_dns_listeningMode: all
     volumes:
       - ./data/etc-pihole/:/etc/pihole/
@@ -75,7 +73,6 @@ services:
       - sinkhole
 
   # --------- TV1: WireGuard VPN (profile: vpn) ---------
-  # Dùng wg-easy bản 14 để khớp các biến môi trường bên dưới.
   wg-easy:
     profiles: ["vpn"]
     image: ghcr.io/wg-easy/wg-easy:14
