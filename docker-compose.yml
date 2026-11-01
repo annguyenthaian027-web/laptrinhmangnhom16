@@ -18,7 +18,7 @@ services:
       - "${PIHOLE_WEB_HTTPS_PORT:-443}:443/tcp"
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
-      FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
+      FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD:-adminpassword}
       FTLCONF_dns_upstreams: "172.20.0.3#53"
       FTLCONF_dns_listeningMode: all
     volumes:
