@@ -40,7 +40,13 @@ cp .env.example .env          # Windows: copy .env.example .env
 # mở .env, đổi PIHOLE_PASSWORD
 docker compose --profile app up -d --build
 ```
-
+thử hoạt động:
+```bash
+dig @127.0.0.1 -p 5353 google.com +short       # ra IP thật
+dig @127.0.0.1 -p 5353 doubleclick.net +short  # ra 0.0.0.0 nếu bị chặn
+docker compose exec pihole dig @127.0.0.1 doubleclick.net +short
+sudo apt update && sudo apt install -y dnsutils
+```
 - Bảng điều khiển: http://localhost:3000
 - Trang quản trị Pi-hole: http://localhost/admin
 - Chỉ chạy Pi-hole và Unbound: `docker compose up -d`
