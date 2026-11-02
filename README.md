@@ -32,9 +32,10 @@ Thiết bị ngoài ──WireGuard──▶ Pi-hole
 ## Cài đặt và chạy
 
 Cần Docker Desktop (hoặc Docker Engine + Compose).
+
+```bash
 git clone https://github.com/annguyenthaian027-web/laptrinhmangnhom16.git
 cd laptrinhmangnhom16
-```bash
 cp .env.example .env          # Windows: copy .env.example .env
 # mở .env, đổi PIHOLE_PASSWORD
 docker compose --profile app up -d --build
