@@ -103,7 +103,7 @@ docker compose up -d
 ## 8. CI/CD
 
 Workflow `.github/workflows/ci.yml` chạy mỗi lần push, gồm 3 bước:
-1. `lint`: yamllint cho compose và workflow, shellcheck cho `install.sh`.
+1. `lint`: yamllint cho `docker-compose.yml`, shellcheck cho `install.sh`.
 2. `build`: kiểm tra cú pháp compose ở mọi profile, build backend/frontend nếu có Dockerfile.
 3. `test-compose`: khởi động Pi-hole + Unbound, thử phân giải DNS và mở trang web Pi-hole.
 
