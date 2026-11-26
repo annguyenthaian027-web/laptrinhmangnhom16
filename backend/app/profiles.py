@@ -1,9 +1,9 @@
 """Logic hồ sơ chặn: đọc catalog.json, lưu hồ sơ đang dùng, áp dụng vào Pi-hole."""
+import asyncio
 import json
-import os
 from pathlib import Path
 
-from . import config
+from . import storage
 from .errors import ApiError
 from .pihole import PiholeClient
 
@@ -17,21 +17,12 @@ def load_catalog() -> dict:
         return json.load(f)
 
 
-def _state_path() -> Path:
-    return Path(config.DATA_DIR) / "state.json"
-
-
 def get_active() -> str | None:
-    try:
-        return json.loads(_state_path().read_text(encoding="utf-8")).get("active")
-    except (OSError, ValueError):
-        return None
+    return storage.get_active()
 
 
 def set_active(profile_id: str) -> None:
-    path = _state_path()
-    os.makedirs(path.parent, exist_ok=True)
-    path.write_text(json.dumps({"active": profile_id}), encoding="utf-8")
+    storage.set_active(profile_id)
 
 
 def list_profiles() -> dict:
@@ -78,5 +69,9 @@ async def apply_profile(client: PiholeClient, profile_id: str) -> dict:
             await client.add_adlist(address, comment)
             added += 1
 
-    set_active(profile_id)
+    await asyncio.to_thread(storage.set_active, profile_id)
+    await asyncio.to_thread(
+        storage.log_event, "apply_profile",
+        {"profile": profile_id, "listsAdded": added, "listsRemoved": removed},
+    )
     return {"active": profile_id, "listsAdded": added, "listsRemoved": removed}

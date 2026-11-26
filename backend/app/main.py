@@ -3,6 +3,7 @@
 Chạy thử:  uvicorn app.main:app --reload --port 8080
 Tài liệu tự động của FastAPI: http://localhost:8080/docs
 """
+import asyncio
 import re
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import config, profiles
+from . import config, profiles, storage
 from .errors import ApiError
 from .pihole import PiholeClient
 
@@ -75,7 +76,9 @@ def create_app(pihole_client: PiholeClient | None = None) -> FastAPI:
 
     @app.post("/api/blocking")
     async def blocking(body: BlockingIn, request: Request):
-        return await pihole(request).set_blocking(body.enabled, body.timer)
+        result = await pihole(request).set_blocking(body.enabled, body.timer)
+        await asyncio.to_thread(storage.log_event, "blocking", {"enabled": body.enabled, "timer": body.timer})
+        return result
 
     # ---------- thống kê ----------
     @app.get("/api/stats")
@@ -131,7 +134,7 @@ def create_app(pihole_client: PiholeClient | None = None) -> FastAPI:
     # ---------- hồ sơ chặn ----------
     @app.get("/api/profiles")
     async def get_profiles():
-        return profiles.list_profiles()
+        return await asyncio.to_thread(profiles.list_profiles)
 
     @app.post("/api/profiles/{profile_id}/apply")
     async def apply_profile(profile_id: str, request: Request, background: BackgroundTasks):
@@ -142,6 +145,12 @@ def create_app(pihole_client: PiholeClient | None = None) -> FastAPI:
             background.add_task(_run_gravity, client)  # chạy nền, không bắt giao diện chờ
         result["gravity"] = "updating" if changed else "unchanged"
         return result
+
+    # ---------- nhật ký thao tác (cần MongoDB Atlas) ----------
+    @app.get("/api/history")
+    async def get_history(limit: int = Query(20, ge=1, le=100)):
+        return {"storage": "mongodb" if storage.use_mongo() else "file",
+                "events": await asyncio.to_thread(storage.history, limit)}
 
     # ---------- sức khỏe hệ thống ----------
     @app.get("/api/health")

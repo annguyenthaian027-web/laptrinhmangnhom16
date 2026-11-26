@@ -1,0 +1,38 @@
+# Render Blueprint: backend + frontend (Pi-hole KHÔNG chạy trên Render, xem docs/TRIEN_KHAI_RENDER.md)
+services:
+  - type: web
+    name: sinkholehome-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: BACKEND_PORT
+        value: "8080"
+      - key: PIHOLE_URL          # địa chỉ Pi-hole trên VPS, ví dụ http://IP_VPS:8081
+        sync: false
+      - key: PIHOLE_PASSWORD
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: sinkholehome
+
+  - type: web
+    name: sinkholehome-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    envVars:
+      - key: PORT
+        value: "80"
+      - key: BACKEND_URL         # URL công khai của backend, ví dụ https://sinkholehome-backend.onrender.com
+        sync: false
+      - key: BASIC_AUTH_USER
+        value: admin
+      - key: BASIC_AUTH_PASS     # mật khẩu vào bảng điều khiển
+        sync: false
