@@ -1,121 +1,193 @@
-"""Kiểm thử đơn vị cho dns_probe.py bằng một máy chủ DNS giả chạy trên socket UDP/TCP cục bộ."""
+#!/usr/bin/env python3
+"""dns_probe.py - Công cụ kiểm tra DNS Sinkhole bằng socket thuần (TV1, nhóm 16).
+
+Chương trình tự dựng bản tin DNS theo RFC 1035, gửi qua UDP (hoặc TCP) tới một
+máy chủ DNS (ví dụ Pi-hole), rồi tự phân tích bản tin trả lời để biết tên miền
+được phân giải bình thường hay bị chặn (0.0.0.0 / NXDOMAIN).
+
+Chỉ dùng thư viện chuẩn của Python (socket, struct, random, time, argparse).
+
+Ví dụ:
+  python3 tools/dns_probe.py --server 127.0.0.1 --port 5353 google.com doubleclick.net
+  python3 tools/dns_probe.py --port 5353 --allowed google.com --blocked doubleclick.net
+"""
+import argparse
+import random
 import socket
 import struct
-import threading
-import unittest
+import sys
+import time
 
-import dns_probe as dp
-
-
-def make_answer(query, ip=None, rcode=0, truncated=False):
-    """Dựng bản tin trả lời giả từ bản tin truy vấn (dùng con trỏ nén 0xC00C)."""
-    qid = struct.unpack("!H", query[:2])[0]
-    question = query[12:]
-    flags = 0x8180 | rcode | (0x0200 if truncated else 0)
-    an = 1 if ip else 0
-    msg = struct.pack("!HHHHHH", qid, flags, 1, an, 0, 0) + question
-    if ip:
-        msg += b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + socket.inet_aton(ip)
-    return msg
+QTYPES = {"A": 1, "AAAA": 28}
+TYPE_NAMES = {1: "A", 5: "CNAME", 28: "AAAA"}
+RCODES = {0: "NOERROR", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN", 4: "NOTIMP", 5: "REFUSED"}
 
 
-class FakeDNS:
-    """Máy chủ DNS giả: google.com -> IP thật, ads.example -> 0.0.0.0, none.example -> NXDOMAIN."""
-
-    def __init__(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("127.0.0.1", 0))
-        self.port = self.sock.getsockname()[1]
-        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp.bind(("127.0.0.1", self.port))
-        self.tcp.listen(5)
-        self.running = True
-        threading.Thread(target=self.serve_udp, daemon=True).start()
-        threading.Thread(target=self.serve_tcp, daemon=True).start()
-
-    def reply(self, query, over_udp):
-        name, _ = dp.read_name(query, 12)
-        if name == "google.com":
-            return make_answer(query, "142.250.1.1")
-        if name == "ads.example":
-            return make_answer(query, "0.0.0.0")
-        if name == "big.example":
-            return make_answer(query, None, truncated=True) if over_udp else make_answer(query, "10.0.0.9")
-        return make_answer(query, None, rcode=3)
-
-    def serve_udp(self):
-        self.sock.settimeout(0.2)
-        while self.running:
-            try:
-                data, addr = self.sock.recvfrom(512)
-            except socket.timeout:
-                continue
-            self.sock.sendto(self.reply(data, True), addr)
-
-    def serve_tcp(self):
-        self.tcp.settimeout(0.2)
-        while self.running:
-            try:
-                conn, _ = self.tcp.accept()
-            except socket.timeout:
-                continue
-            with conn:
-                n = struct.unpack("!H", conn.recv(2))[0]
-                q = conn.recv(n)
-                r = self.reply(q, False)
-                conn.sendall(struct.pack("!H", len(r)) + r)
-
-    def close(self):
-        self.running = False
+def build_query(domain, qtype="A", query_id=None):
+    """Dựng bản tin truy vấn DNS: header 12 byte + phần câu hỏi."""
+    if query_id is None:
+        query_id = random.randint(0, 0xFFFF)
+    flags = 0x0100  # RD = 1: yêu cầu máy chủ phân giải đệ quy
+    header = struct.pack("!HHHHHH", query_id, flags, 1, 0, 0, 0)
+    qname = b""
+    for label in domain.strip(".").split("."):
+        raw = label.encode("idna")
+        if not 0 < len(raw) < 64:
+            raise ValueError("nhãn tên miền không hợp lệ: %r" % label)
+        qname += bytes([len(raw)]) + raw
+    qname += b"\x00"
+    question = qname + struct.pack("!HH", QTYPES[qtype], 1)  # QTYPE, QCLASS = IN
+    return query_id, header + question
 
 
-class ProbeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.srv = FakeDNS()
+def read_name(msg, offset):
+    """Đọc tên miền (có hỗ trợ con trỏ nén 0xC0) và trả về (tên, vị trí kế tiếp)."""
+    labels, jumped, end, hops = [], False, offset, 0
+    while True:
+        if offset >= len(msg):
+            raise ValueError("bản tin bị cắt cụt")
+        length = msg[offset]
+        if length & 0xC0 == 0xC0:  # con trỏ nén
+            if offset + 1 >= len(msg):
+                raise ValueError("con trỏ nén không hợp lệ")
+            pointer = ((length & 0x3F) << 8) | msg[offset + 1]
+            if not jumped:
+                end = offset + 2
+            offset, jumped = pointer, True
+            hops += 1
+            if hops > 20:
+                raise ValueError("vòng lặp con trỏ nén")
+            continue
+        offset += 1
+        if length == 0:
+            break
+        labels.append(msg[offset:offset + length].decode("ascii", "replace"))
+        offset += length
+    return ".".join(labels), (offset if not jumped else end)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.srv.close()
 
-    def run_probe(self, domain, **kw):
-        return dp.probe(domain, "127.0.0.1", self.srv.port, timeout=2, **kw)
+def parse_response(msg, expect_id=None):
+    """Phân tích bản tin trả lời. Trả về dict gồm id, rcode, truncated, answers."""
+    if len(msg) < 12:
+        raise ValueError("bản tin ngắn hơn header")
+    rid, flags, qd, an, ns, ar = struct.unpack("!HHHHHH", msg[:12])
+    if expect_id is not None and rid != expect_id:
+        raise ValueError("sai ID bản tin (có thể là gói giả mạo)")
+    if not flags & 0x8000:
+        raise ValueError("đây không phải bản tin trả lời (QR = 0)")
+    offset = 12
+    for _ in range(qd):  # bỏ qua phần câu hỏi
+        _, offset = read_name(msg, offset)
+        offset += 4
+    answers = []
+    for _ in range(an):
+        name, offset = read_name(msg, offset)
+        rtype, rclass, ttl, rdlen = struct.unpack("!HHIH", msg[offset:offset + 10])
+        offset += 10
+        rdata = msg[offset:offset + rdlen]
+        offset += rdlen
+        if rtype == 1 and rdlen == 4:
+            value = socket.inet_ntop(socket.AF_INET, rdata)
+        elif rtype == 28 and rdlen == 16:
+            value = socket.inet_ntop(socket.AF_INET6, rdata)
+        elif rtype == 5:
+            value, _ = read_name(msg, offset - rdlen)
+        else:
+            value = rdata.hex()
+        answers.append({"name": name, "type": TYPE_NAMES.get(rtype, str(rtype)), "ttl": ttl, "value": value})
+    return {"id": rid, "rcode": flags & 0x000F, "truncated": bool(flags & 0x0200), "answers": answers}
 
-    def test_build_query_header_and_name(self):
-        qid, pkt = dp.build_query("www.example.com", "A", query_id=0x1234)
-        self.assertEqual(pkt[:2], b"\x12\x34")
-        self.assertEqual(struct.unpack("!H", pkt[4:6])[0], 1)  # QDCOUNT = 1
-        self.assertEqual(pkt[12:], b"\x03www\x07example\x03com\x00\x00\x01\x00\x01")
 
-    def test_normal_domain_is_ok(self):
-        label, detail, _, proto = self.run_probe("google.com")
-        self.assertEqual((label, detail, proto), ("OK", "142.250.1.1", "UDP"))
+def send_udp(packet, server, port, timeout):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(timeout)
+        s.sendto(packet, (server, port))
+        data, _ = s.recvfrom(4096)
+        return data
 
-    def test_sinkhole_address_is_blocked(self):
-        label, detail, _, _ = self.run_probe("ads.example")
-        self.assertEqual(label, "BLOCKED")
-        self.assertIn("0.0.0.0", detail)
 
-    def test_nxdomain_is_blocked(self):
-        label, detail, _, _ = self.run_probe("none.example")
-        self.assertEqual((label, detail), ("BLOCKED", "NXDOMAIN"))
+def send_tcp(packet, server, port, timeout):
+    """DNS qua TCP: mỗi bản tin có thêm 2 byte độ dài ở đầu (RFC 1035, mục 4.2.2)."""
+    with socket.create_connection((server, port), timeout=timeout) as s:
+        s.sendall(struct.pack("!H", len(packet)) + packet)
+        head = b""
+        while len(head) < 2:
+            chunk = s.recv(2 - len(head))
+            if not chunk:
+                raise ConnectionError("máy chủ đóng kết nối")
+            head += chunk
+        need = struct.unpack("!H", head)[0]
+        data = b""
+        while len(data) < need:
+            chunk = s.recv(need - len(data))
+            if not chunk:
+                raise ConnectionError("máy chủ đóng kết nối")
+            data += chunk
+        return data
 
-    def test_truncated_udp_falls_back_to_tcp(self):
-        label, detail, _, proto = self.run_probe("big.example")
-        self.assertEqual((label, detail, proto), ("OK", "10.0.0.9", "TCP"))
 
-    def test_wrong_id_is_rejected(self):
-        _, pkt = dp.build_query("google.com", "A", query_id=1)
-        reply = make_answer(pkt, "1.2.3.4")
-        with self.assertRaises(ValueError):
-            dp.parse_response(reply, expect_id=2)
+def classify(result, qtype="A"):
+    """Phân loại kết quả: BLOCKED / OK / NODATA / ERROR."""
+    if result["rcode"] == 3:
+        return "BLOCKED", "NXDOMAIN"
+    if result["rcode"] != 0:
+        return "ERROR", RCODES.get(result["rcode"], str(result["rcode"]))
+    addrs = [a["value"] for a in result["answers"] if a["type"] in ("A", "AAAA")]
+    if not addrs:
+        return "NODATA", "không có bản ghi địa chỉ"
+    if all(a in ("0.0.0.0", "::") for a in addrs):
+        return "BLOCKED", "sinkhole " + addrs[0]
+    return "OK", ", ".join(addrs)
 
-    def test_cli_exit_code(self):
-        port = str(self.srv.port)
-        ok = dp.main(["--port", port, "--allowed", "google.com", "--blocked", "ads.example"])
-        bad = dp.main(["--port", port, "--blocked", "google.com"])
-        self.assertEqual((ok, bad), (0, 1))
+
+def probe(domain, server, port, qtype="A", timeout=3.0, use_tcp=False):
+    """Gửi một truy vấn và trả về (nhãn, chi tiết, thời gian ms, giao thức)."""
+    qid, packet = build_query(domain, qtype)
+    started = time.perf_counter()
+    proto = "TCP" if use_tcp else "UDP"
+    data = (send_tcp if use_tcp else send_udp)(packet, server, port, timeout)
+    result = parse_response(data, qid)
+    if result["truncated"] and not use_tcp:  # bản tin UDP bị cắt: thử lại bằng TCP
+        data = send_tcp(packet, server, port, timeout)
+        result, proto = parse_response(data, qid), "TCP"
+    elapsed = (time.perf_counter() - started) * 1000
+    label, detail = classify(result, qtype)
+    return label, detail, elapsed, proto
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Kiểm tra DNS Sinkhole bằng socket thuần")
+    ap.add_argument("domains", nargs="*", help="các tên miền cần kiểm tra")
+    ap.add_argument("--server", default="127.0.0.1", help="địa chỉ máy chủ DNS (mặc định 127.0.0.1)")
+    ap.add_argument("--port", type=int, default=5353, help="cổng DNS (mặc định 5353)")
+    ap.add_argument("--type", choices=QTYPES, default="A", help="loại bản ghi (A hoặc AAAA)")
+    ap.add_argument("--tcp", action="store_true", help="dùng TCP thay vì UDP")
+    ap.add_argument("--timeout", type=float, default=3.0, help="thời gian chờ mỗi truy vấn (giây)")
+    ap.add_argument("--blocked", nargs="*", default=[], help="tên miền PHẢI bị chặn")
+    ap.add_argument("--allowed", nargs="*", default=[], help="tên miền PHẢI được phân giải")
+    args = ap.parse_args(argv)
+
+    checks = [(d, "BLOCKED") for d in args.blocked] + [(d, "OK") for d in args.allowed] + [(d, None) for d in args.domains]
+    if not checks:
+        ap.error("cần ít nhất một tên miền")
+    print("Máy chủ DNS: %s:%d (%s, bản ghi %s)" % (args.server, args.port, "TCP" if args.tcp else "UDP", args.type))
+    print("%-28s %-9s %-8s %-4s %s" % ("Tên miền", "Kết quả", "Thời gian", "Giao thức", "Chi tiết"))
+    failed = 0
+    for domain, want in checks:
+        try:
+            label, detail, ms, proto = probe(domain, args.server, args.port, args.type, args.timeout, args.tcp)
+        except socket.timeout:
+            label, detail, ms, proto = "ERROR", "hết thời gian chờ", 0.0, "-"
+        except (OSError, ValueError) as exc:
+            label, detail, ms, proto = "ERROR", str(exc), 0.0, "-"
+        verdict = ""
+        if want:
+            ok = label == want
+            verdict = "  [ĐẠT]" if ok else "  [SAI, mong đợi %s]" % want
+            failed += 0 if ok else 1
+        print("%-28s %-9s %6.1f ms %-9s %s%s" % (domain, label, ms, proto, detail, verdict))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    unittest.main()
+    sys.exit(main())
